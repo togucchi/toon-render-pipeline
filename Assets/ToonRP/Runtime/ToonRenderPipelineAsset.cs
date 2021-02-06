@@ -6,6 +6,7 @@ using UnityEngine.Rendering;
 namespace Toguchi.Rendering
 {
     [ExecuteInEditMode]
+    [CreateAssetMenu(menuName = "ToonRenderPipelineAsset")]
     public class ToonRenderPipelineAsset : RenderPipelineAsset
     {
         [SerializeField]

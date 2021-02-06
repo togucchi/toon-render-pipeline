@@ -6,7 +6,7 @@ using Unity.Collections;
 
 namespace Toguchi.Rendering
 {
-    public sealed partial class ToonRenderPipeline : RenderPipeline
+    public sealed class ToonRenderPipeline : RenderPipeline
     {
         private const int MAX_CAMERA_COUNT = 4;
 
