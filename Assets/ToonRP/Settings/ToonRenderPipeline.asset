@@ -12,5 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c99360fcd29c54d4487d7d434bbccd94, type: 3}
   m_Name: ToonRenderPipeline
   m_EditorClassIdentifier: 
-  shadowMapSize: 1024
   modelRenderResolutionRate: 0.7
+  useReflection: 1
+  reflectionSettings:
+    scale: 3
+    clipPlaneOffset: 0.16

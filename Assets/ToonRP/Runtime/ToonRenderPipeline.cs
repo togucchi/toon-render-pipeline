@@ -11,17 +11,28 @@ namespace Toguchi.Rendering
         private const int MAX_CAMERA_COUNT = 4;
 
         private const string FORWARD_SHADER_TAG = "ToonForward";
+        private const string FORWARD_REFLECTION_SHADER_TAG = "ToonForwardReflection";
 
-        private CommandBuffer[] commandBuffers = new CommandBuffer[MAX_CAMERA_COUNT];
+        private readonly int reflectionTextureId = Shader.PropertyToID("_ReflectionTex");
+
+        private CommandBuffer commandBuffer;
 
         private ToonRenderPipelineAsset renderPipelineAsset;
 
         private CullingResults cullingResults;
+        private CullingResults reflectionCullingResults;
 
-        private enum RenderTextureType
+        public static ToonRenderPipeline Instance;
+
+        public static ToonRenderPipelineAsset Asset;
+
+        public static System.Action<ScriptableRenderContext, CommandBuffer, Camera> OnBeforeRenderCamera;
+
+        public enum RenderTextureType
         {
             ModelColor,
             ModelDepth,
+            Reflection,
 
             Count,
         }
@@ -33,19 +44,25 @@ namespace Toguchi.Rendering
             renderPipelineAsset = asset;
 
             // CommandBufferの事前生成
-            for (int i = 0; i < commandBuffers.Length; i++)
-            {
-                commandBuffers[i] = new CommandBuffer();
-                commandBuffers[i].name = "ToonRP";
-            }
+            commandBuffer = new CommandBuffer();
+            commandBuffer.name = "ToonRP";
         }
 
         protected override void Render(ScriptableRenderContext context, Camera[] cameras)
         {
+            // Set static asset
+            Instance = this;
+            Asset = renderPipelineAsset;
+
             for(int i = 0; i < cameras.Length; i++)
             {
                 var camera = cameras[i];
-                var commandBuffer = commandBuffers[i];
+
+                // RenderTexture作成
+                CreateRenderTexture(context, camera, commandBuffer);
+
+                // カメラ描画前コールバック発火
+                OnBeforeRenderCamera?.Invoke(context, commandBuffer, camera);
 
                 // カメラプロパティ設定
                 context.SetupCameraProperties(camera);
@@ -56,9 +73,6 @@ namespace Toguchi.Rendering
                     continue;
                 }
                 cullingResults = context.Cull(ref cullingParameters);
-
-                // RenderTexture作成
-                CreateRenderTexture(context, camera, commandBuffer);
 
                 // モデル描画用RTのClear
                 ClearModelRenderTexture(context, camera, commandBuffer);
@@ -117,7 +131,14 @@ namespace Toguchi.Rendering
             var modelHeight = (int)((float)height * renderPipelineAsset.ModelRenderResolutionRate);
 
             commandBuffer.GetTemporaryRT((int)RenderTextureType.ModelColor, modelWidth, modelHeight, 0, FilterMode.Bilinear, RenderTextureFormat.Default);
-            commandBuffer.GetTemporaryRT((int)RenderTextureType.ModelDepth, modelWidth, modelHeight, 0, FilterMode.Point, RenderTextureFormat.Depth);
+            commandBuffer.GetTemporaryRT((int)RenderTextureType.ModelDepth, modelWidth, modelHeight, 16, FilterMode.Point, RenderTextureFormat.Depth);
+            if(renderPipelineAsset.UseReflection)
+            {
+                var reflectionWidth = (int)(modelWidth / (float)renderPipelineAsset.ReflectionSettings.scale);
+                var reflectionHeight = (int)(modelHeight / (float)renderPipelineAsset.ReflectionSettings.scale);
+
+                commandBuffer.GetTemporaryRT((int)RenderTextureType.Reflection, reflectionWidth, reflectionHeight, 16, FilterMode.Bilinear, RenderTextureFormat.Default);
+            }
 
             context.ExecuteCommandBuffer(commandBuffer);
 
@@ -247,5 +268,90 @@ namespace Toguchi.Rendering
 
             context.ExecuteCommandBuffer(commandBuffer);
         }
+
+        #region Refleciton
+
+        public void RenderRefletion(ScriptableRenderContext context, Camera camera, CommandBuffer commandBuffer)
+        {
+            // カメラプロパティ設定
+            context.SetupCameraProperties(camera);
+
+            // Culling
+            if (!camera.TryGetCullingParameters(false, out var cullingParameters))
+            {
+                Debug.Log("Failed culling");
+                return;
+            }
+            reflectionCullingResults = context.Cull(ref cullingParameters);
+
+            commandBuffer.Clear();
+            commandBuffer.SetRenderTarget(renderTargetIdentifiers[(int)RenderTextureType.Reflection]);
+            if (camera.clearFlags == CameraClearFlags.Depth || camera.clearFlags == CameraClearFlags.Skybox)
+            {
+                commandBuffer.ClearRenderTarget(true, false, Color.black, 1.0f);
+            }
+            else if (camera.clearFlags == CameraClearFlags.SolidColor)
+            {
+                commandBuffer.ClearRenderTarget(true, true, camera.backgroundColor, 1.0f);
+            }
+            context.ExecuteCommandBuffer(commandBuffer);
+
+            // 不透明オブジェクト描画
+            DrawOpaqueReflection(context, camera, commandBuffer);
+
+            // Skybox描画
+            if (camera.clearFlags == CameraClearFlags.Skybox)
+            {
+                context.DrawSkybox(camera);
+            }
+
+            // 半透明オブジェクト描画
+            DrawTransparentReflection(context, camera, commandBuffer);
+
+            // ExecuteCommandBuffer
+            commandBuffer.Clear();
+            commandBuffer.SetGlobalTexture(reflectionTextureId, new RenderTargetIdentifier((int)ToonRenderPipeline.RenderTextureType.Reflection));
+            context.ExecuteCommandBuffer(commandBuffer);
+        }
+
+        private void DrawOpaqueReflection(ScriptableRenderContext context, Camera camera, CommandBuffer commandBuffer)
+        {
+            commandBuffer.Clear();
+
+            commandBuffer.SetRenderTarget(renderTargetIdentifiers[(int)RenderTextureType.Reflection]);
+            context.ExecuteCommandBuffer(commandBuffer);
+
+            // Filtering, Sort
+            var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };
+            var settings = new DrawingSettings(new ShaderTagId(FORWARD_REFLECTION_SHADER_TAG), sortingSettings);
+            var filterSettings = new FilteringSettings(
+                new RenderQueueRange(0, (int)RenderQueue.GeometryLast),
+                camera.cullingMask
+                );
+
+            // Rendering
+            context.DrawRenderers(reflectionCullingResults, ref settings, ref filterSettings);
+        }
+
+        private void DrawTransparentReflection(ScriptableRenderContext context, Camera camera, CommandBuffer commandBuffer)
+        {
+            commandBuffer.Clear();
+
+            commandBuffer.SetRenderTarget(renderTargetIdentifiers[(int)RenderTextureType.Reflection]); 
+            context.ExecuteCommandBuffer(commandBuffer);
+
+            // Filtering, Sort
+            var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonTransparent };
+            var settings = new DrawingSettings(new ShaderTagId(FORWARD_REFLECTION_SHADER_TAG), sortingSettings);
+            var filterSettings = new FilteringSettings(
+                new RenderQueueRange((int)RenderQueue.GeometryLast, (int)RenderQueue.Transparent),
+                camera.cullingMask
+                );
+
+            // 描画
+            context.DrawRenderers(reflectionCullingResults, ref settings, ref filterSettings);
+        }
+
+        #endregion
     }
 }
