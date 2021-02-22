@@ -17,3 +17,4 @@ MonoBehaviour:
   reflectionSettings:
     scale: 3
     clipPlaneOffset: 0.16
+    blurPower: 0.03

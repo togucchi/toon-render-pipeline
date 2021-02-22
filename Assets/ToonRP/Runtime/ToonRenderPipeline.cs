@@ -32,7 +32,10 @@ namespace Toguchi.Rendering
         {
             ModelColor,
             ModelDepth,
+            
             Reflection,
+            ReflectionBlur1,
+            ReflectionBlur2,
 
             Count,
         }
@@ -138,6 +141,9 @@ namespace Toguchi.Rendering
                 var reflectionHeight = (int)(modelHeight / (float)renderPipelineAsset.ReflectionSettings.scale);
 
                 commandBuffer.GetTemporaryRT((int)RenderTextureType.Reflection, reflectionWidth, reflectionHeight, 16, FilterMode.Bilinear, RenderTextureFormat.Default);
+                commandBuffer.GetTemporaryRT((int)RenderTextureType.ReflectionBlur1, reflectionWidth, reflectionHeight, 16, FilterMode.Bilinear, RenderTextureFormat.Default);
+                commandBuffer.GetTemporaryRT((int)RenderTextureType.ReflectionBlur2, reflectionWidth, reflectionHeight, 16, FilterMode.Bilinear, RenderTextureFormat.Default);
+
             }
 
             context.ExecuteCommandBuffer(commandBuffer);
@@ -271,7 +277,7 @@ namespace Toguchi.Rendering
 
         #region Refleciton
 
-        public void RenderRefletion(ScriptableRenderContext context, Camera camera, CommandBuffer commandBuffer)
+        public void RenderReflection(ScriptableRenderContext context, Camera camera, CommandBuffer commandBuffer)
         {
             // カメラプロパティ設定
             context.SetupCameraProperties(camera);
@@ -310,6 +316,15 @@ namespace Toguchi.Rendering
 
             // ExecuteCommandBuffer
             commandBuffer.Clear();
+
+            var material = new Material(Shader.Find("Hidden/ToonRP/HexBlur"));
+            
+            // commandBuffer.ClearRenderTarget(true, true, camera.backgroundColor, 1.0f);
+            commandBuffer.SetGlobalFloat("_BlurPower", Asset.ReflectionSettings.blurPower);
+            commandBuffer.Blit(renderTargetIdentifiers[(int)RenderTextureType.Reflection], renderTargetIdentifiers[(int)RenderTextureType.ReflectionBlur1], material, 0);
+            commandBuffer.Blit(renderTargetIdentifiers[(int)RenderTextureType.ReflectionBlur1], renderTargetIdentifiers[(int)RenderTextureType.ReflectionBlur2], material, 1);
+            
+            commandBuffer.Blit(renderTargetIdentifiers[(int)RenderTextureType.ReflectionBlur2], renderTargetIdentifiers[(int)RenderTextureType.Reflection]);
             commandBuffer.SetGlobalTexture(reflectionTextureId, new RenderTargetIdentifier((int)ToonRenderPipeline.RenderTextureType.Reflection));
             context.ExecuteCommandBuffer(commandBuffer);
         }

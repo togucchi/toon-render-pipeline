@@ -23,6 +23,7 @@ namespace Toguchi.Rendering
         {
             public ReflectionScale scale = ReflectionScale.Third;
             public float clipPlaneOffset = 0.07f;
+            public float blurPower = 0.05f;
         }
 
         private static Camera reflectionCamera;
@@ -169,7 +170,7 @@ namespace Toguchi.Rendering
             PlanarReflectionSettingData.Set();
 
             // 反射描画
-            ToonRenderPipeline.Instance.RenderRefletion(context, reflectionCamera, commandBuffer);
+            ToonRenderPipeline.Instance.RenderReflection(context, reflectionCamera, commandBuffer);
 
             PlanarReflectionSettingData.Restore();
         }
